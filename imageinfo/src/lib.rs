@@ -4,8 +4,11 @@ use rand::{thread_rng, RngCore};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use std::io::Write;
+use std::path::PathBuf;
 use std::{collections::HashMap, fs};
 
+use image_rs::pull::PullClient;
+use oci_distribution::secrets::RegistryAuth;
 use sev::certs::snp::ecdsa::Signature;
 use sev::firmware::{
     guest::{AttestationReport, Firmware},
@@ -23,9 +26,19 @@ struct RequestData {
     hw_attest: String,
 }
 
-pub async fn send_image_info(image: &str, digest: &str) -> Result<String> {
-    let client = Client::new();
+pub async fn send_image(image: &str) -> Result<String> {
+    let reference: oci_distribution::Reference = image.parse().unwrap();
+    let auth = RegistryAuth::Anonymous;
+    let path = PathBuf::new();
+    let mut reg_client = PullClient::new(reference.clone(), &path, &auth, 1).unwrap();
+    let (_, digest, _) = reg_client.pull_manifest().await.unwrap();
 
+    let ok = read_cmdline(&reference.to_string(), &digest.to_string()).await?;
+    Ok(ok)
+}
+
+pub async fn read_cmdline(image: &str, digest: &str) -> Result<String> {
+    let client = Client::new();
     let b64_value = base64_encode_report(&get_report().unwrap()).unwrap();
 
     let req_data = RequestData {
@@ -37,7 +50,6 @@ pub async fn send_image_info(image: &str, digest: &str) -> Result<String> {
     let json_data = serde_json::to_string(&req_data)?;
 
     let cmdline = fs::read_to_string("/proc/cmdline")?;
-
     let mut cmd_map: HashMap<String, String> = HashMap::new();
 
     for entry in cmdline.split_whitespace() {
