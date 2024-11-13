@@ -11,6 +11,6 @@ base64 = "0.22.1"
 rand = "0.8.5"
 reqwest = "0.12.9"
 serde = "1.0.202"
-serde_json = "1.0.132"
+serde_json = "1.0.39"
 sev = "3.1.1"
 sevsnp = { git = "https://github.com/EmmEff/sevsnp.git", version = "0.1.0" }
