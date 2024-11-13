@@ -1,0 +1,16 @@
+[package]
+name = "imageinfo"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+anyhow = "1.0.93"
+base64 = "0.22.1"
+rand = "0.8.5"
+reqwest = "0.12.9"
+serde = "1.0.215"
+serde_json = "1.0.132"
+sev = "3.1.1"
+sevsnp = { git = "https://github.com/EmmEff/sevsnp.git", version = "0.1.0" }
