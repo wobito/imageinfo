@@ -1,4 +1,4 @@
-use anyhow::{Context, Result};
+use anyhow::{anyhow, Context, Result};
 use base64::engine::{general_purpose, Engine as _};
 use rand::{thread_rng, RngCore};
 use reqwest::Client;
@@ -27,19 +27,55 @@ struct RequestData {
 }
 
 pub async fn send_image(image: &str) -> Result<String> {
-    let reference: oci_distribution::Reference = image.parse().unwrap();
     let auth = RegistryAuth::Anonymous;
     let path = PathBuf::new();
-    let mut reg_client = PullClient::new(reference.clone(), &path, &auth, 1).unwrap();
-    let (_, digest, _) = reg_client.pull_manifest().await.unwrap();
 
-    let ok = read_cmdline(&reference.to_string(), &digest.to_string()).await?;
+    let reference: oci_distribution::Reference = match image.parse() {
+        Ok(reference) => reference,
+        Err(e) => {
+            println!("Error parsing image: {}", e);
+            return Err(anyhow!("Error parsing image"));
+        }
+    };
+
+    let mut reg_client = match PullClient::new(reference.clone(), &path, &auth, 1) {
+        Ok(reg_client) => reg_client,
+        Err(e) => {
+            println!("Error creating pull client: {}", e);
+            return Err(anyhow!("Error creating pull client"));
+        }
+    };
+
+    let digest = match reg_client.pull_manifest().await {
+        Ok((_, digest, _)) => digest,
+        Err(e) => {
+            println!("Error pulling manifest: {}", e);
+            return Err(anyhow!("Error pulling manifest"));
+        }
+    };
+
+    let ok = send_report(&reference.to_string(), &digest.to_string()).await?;
     Ok(ok)
 }
 
-pub async fn read_cmdline(image: &str, digest: &str) -> Result<String> {
+pub async fn send_report(image: &str, digest: &str) -> Result<String> {
     let client = Client::new();
-    let b64_value = base64_encode_report(&get_report().unwrap()).unwrap();
+
+    let report = match get_report() {
+        Ok(report) => report,
+        Err(e) => {
+            println!("Error getting report: {}", e);
+            return Err(anyhow!("Error getting report"));
+        }
+    };
+
+    let b64_value = match base64_encode_report(&report) {
+        Ok(b64_value) => b64_value,
+        Err(e) => {
+            println!("Error encoding report: {}", e);
+            return Err(anyhow!("Error encoding report"));
+        }
+    };
 
     let req_data = RequestData {
         image: String::from(image),
@@ -49,16 +85,7 @@ pub async fn read_cmdline(image: &str, digest: &str) -> Result<String> {
 
     let json_data = serde_json::to_string(&req_data)?;
 
-    let cmdline = fs::read_to_string("/proc/cmdline")?;
-    let mut cmd_map: HashMap<String, String> = HashMap::new();
-
-    for entry in cmdline.split_whitespace() {
-        if let Some((key, value)) = entry.split_once('=') {
-            cmd_map.insert(key.to_string(), value.to_string());
-        } else {
-            cmd_map.insert(entry.to_string(), String::new());
-        }
-    }
+    let cmd_map = parse_cmdline();
 
     let key = "sylabs.attest_server";
     if let Some(value) = cmd_map.get(key) {
@@ -67,6 +94,28 @@ pub async fn read_cmdline(image: &str, digest: &str) -> Result<String> {
     }
 
     Ok("done".to_string())
+}
+
+fn parse_cmdline() -> HashMap<String, String> {
+    let cmd_map = match fs::read_to_string("/proc/cmdline") {
+        Ok(cmdline) => {
+            let mut cmd_map: HashMap<String, String> = HashMap::new();
+            for entry in cmdline.split_whitespace() {
+                if let Some((key, value)) = entry.split_once('=') {
+                    cmd_map.insert(key.to_string(), value.to_string());
+                } else {
+                    cmd_map.insert(entry.to_string(), String::new());
+                }
+            }
+            cmd_map
+        }
+        Err(e) => {
+            println!("Error reading cmdline: {}", e);
+            HashMap::new()
+        }
+    };
+
+    cmd_map
 }
 
 struct SnpEvidence {
@@ -107,7 +156,10 @@ fn get_report() -> Result<Attestation> {
 
     let snp_evidence = match request_hardware_report(data, vmpl) {
         Ok(value) => value,
-        Err(_) => panic!("not working"),
+        Err(e) => {
+            println!("Error requesting hardware report: {}", e);
+            return Err(anyhow!("Error requesting hardware report"));
+        }
     };
 
     let mut attestation = Attestation::default();
